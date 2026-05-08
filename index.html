@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HYPERDYNE — Runway 재무 관리</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script type="module">
+// ── Firebase 초기화
+import{initializeApp}from'https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js';
+import{getFirestore,doc,getDoc,setDoc,onSnapshot}from'https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js';
+
+const firebaseConfig={
+  apiKey:"AIzaSyBO0OmGnIyilp24OuYKLtaBW-qwUh8DQxg",
+  authDomain:"hyperdyne-runway-v1.firebaseapp.com",
+  projectId:"hyperdyne-runway-v1",
+  storageBucket:"hyperdyne-runway-v1.firebasestorage.app",
+  messagingSenderId:"320767779455",
+  appId:"1:320767779455:web:811acbabb67196bfc5154a"
+};
+const fbApp=initializeApp(firebaseConfig);
+const db=getFirestore(fbApp);
+const DOC=doc(db,'hyperdyne','runway');
+
+// Firestore → 앱에 데이터 전달 (전역 함수로 노출)
+window._fbSave=async function(d){
+  try{await setDoc(DOC,{payload:JSON.stringify(d)});}
+  catch(e){console.warn('Firebase 저장 실패(로컬만 저장됨):',e);}
+};
+
+// 실시간 동기화: Firestore 변경 시 앱 데이터 갱신
+let _ignoreNext=false; // 내가 저장한 것은 무시
+onSnapshot(DOC,snap=>{
+  if(!snap.exists())return;
+  if(_ignoreNext){_ignoreNext=false;return;}
+  try{
+    const remote=JSON.parse(snap.data().payload||'null');
+    if(!remote||!remote.lastUpdated)return;
+    // 현재 로컬보다 최신이면 반영
+    if(!window._appData||new Date(remote.lastUpdated)>new Date(window._appData.lastUpdated||0)){
+      window._applyRemote(remote);
+    }
+  }catch(e){}
+});
+window._ignoreNext=()=>{_ignoreNext=true;};
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0d0d0d;--bg2:#161616;--bg3:#1e1e1e;--bg4:#252525;--border:#2e2e2e;--border2:#3a3a3a;--lime:#C8F135;--cyan:#3EC9F5;--purple:#a78bfa;--text:#f0f0f0;--text2:#aaaaaa;--text3:#666;--danger:#ff4455;--warn:#ffaa00;--safe:#00cc88;--radius:8px;--radius-lg:12px}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-size:14px;min-height:100vh}
+#gate{position:fixed;inset:0;background:#0d0d0d;display:flex;align-items:center;justify-content:center;z-index:999}
+.gate-box{text-align:center;width:320px}
+.gate-logo{font-size:28px;font-weight:700;letter-spacing:.15em;color:var(--lime);margin-bottom:6px}
+.gate-sub{color:var(--text2);font-size:13px;margin-bottom:32px}
+.gate-box input{width:100%;padding:12px 16px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);color:var(--text);font-size:18px;letter-spacing:.3em;text-align:center;margin-bottom:12px}
+.gate-box input:focus{outline:none;border-color:var(--lime)}
+.gate-btn{width:100%;padding:12px;background:var(--lime);color:#000;font-weight:700;font-size:14px;border:none;border-radius:var(--radius);cursor:pointer}
+.gate-btn:hover{background:#d4f840}
+.gate-err{color:var(--danger);font-size:12px;margin-top:8px;height:16px}
+#app{display:none;min-height:100vh;flex-direction:column}
+header{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24px;height:56px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
+.logo{font-size:18px;font-weight:700;letter-spacing:.12em;color:var(--lime)}
+.header-sep{width:1px;height:20px;background:var(--border2)}
+.header-date{color:var(--text2);font-size:12px}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.btn{padding:7px 14px;border-radius:var(--radius);font-size:13px;cursor:pointer;border:none;font-weight:500;transition:opacity .15s}
+.btn-outline{background:transparent;border:1px solid var(--border2);color:var(--text2)}.btn-outline:hover{border-color:var(--text2);color:var(--text)}
+.btn-cyan{background:var(--cyan);color:#000}.btn-cyan:hover{opacity:.88}
+.btn-lime{background:var(--lime);color:#000}.btn-lime:hover{opacity:.88}
+.btn-danger{background:transparent;border:1px solid var(--danger);color:var(--danger);padding:4px 10px;font-size:12px}
+.btn-sm{padding:5px 10px;font-size:12px}
+.main-nav{display:flex;border-bottom:1px solid var(--border);background:var(--bg2);padding:0 24px}
+.main-nav button{padding:14px 20px;background:none;border:none;color:var(--text2);font-size:14px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500}
+.main-nav button.active{color:var(--lime);border-bottom-color:var(--lime)}
+.content{flex:1;padding:24px;max-width:1200px;margin:0 auto;width:100%}
+.sub-nav{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.sub-nav button{padding:7px 14px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:20px;font-size:13px;cursor:pointer}
+.sub-nav button.active{background:var(--bg4);border-color:var(--border2);color:var(--text)}
+.section{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:16px;overflow:hidden}
+.section-header{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.section-title{font-size:14px;font-weight:600;color:var(--text)}
+.section-body{padding:16px 18px}
+.balance-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.bc{border:1px solid var(--border2);border-radius:var(--radius-lg);padding:16px 20px}
+.bc-op{background:rgba(200,241,53,.04);border-color:rgba(200,241,53,.2)}
+.bc-gov{background:rgba(167,139,250,.04);border-color:rgba(167,139,250,.2)}
+.bc-lbl{font-size:11px;font-weight:600;letter-spacing:.06em;margin-bottom:6px}
+.lbl-op{color:var(--lime)}.lbl-gov{color:var(--purple)}
+.bc-val{font-size:20px;font-weight:700;margin-bottom:8px}
+.val-op{color:var(--lime)}.val-gov{color:var(--purple)}
+.bc-wrap{display:flex;gap:8px;align-items:center}
+.bc-wrap input{background:var(--bg4);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:var(--radius);font-size:14px;font-weight:600;flex:1;text-align:right}
+.bc-wrap input:focus{outline:none;border-color:var(--lime)}
+.bc-note{font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5}
+.bc-auto{font-size:11px;color:rgba(167,139,250,.6);margin-top:4px}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--bg3);color:var(--text2);font-weight:500;padding:8px 10px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border)}
+td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+td input,td select{background:var(--bg3);border:1px solid transparent;color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px;width:100%;min-width:80px}
+td input:focus,td select:focus{outline:none;border-color:var(--cyan)}
+td select option{background:var(--bg3)}
+.req{color:var(--danger);font-size:10px;vertical-align:super}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.tag-gov{background:rgba(167,139,250,.15);color:var(--purple)}
+.tag-sales{background:rgba(62,201,245,.15);color:var(--cyan)}
+.tag-ok{background:rgba(0,204,136,.15);color:var(--safe)}
+.tag-pend{background:rgba(255,170,0,.15);color:var(--warn)}
+.tag-danger{background:rgba(255,68,85,.15);color:var(--danger)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.kpi5{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+.kpi3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.kc{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
+.kc-lbl{font-size:11px;color:var(--text2);margin-bottom:7px;letter-spacing:.03em}
+.kc-val{font-size:20px;font-weight:700;line-height:1}
+.kc-sub{font-size:11px;color:var(--text3);margin-top:4px}
+.lime{color:var(--lime)}.cyan{color:var(--cyan)}.purple{color:var(--purple)}
+.red{color:var(--danger)}.orange{color:var(--warn)}.green{color:var(--safe)}
+.chart-box{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px}
+.ct{font-size:13px;font-weight:600;color:var(--text2);margin-bottom:4px}
+.cl{display:flex;gap:14px;margin-bottom:12px;flex-wrap:wrap}
+.cl-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)}
+.cl-dot{width:9px;height:9px;border-radius:50%}
+.cl-bar{width:11px;height:9px;border-radius:2px}
+.cw{position:relative;height:270px}
+.divider{display:flex;align-items:center;gap:12px;margin:18px 0 12px;font-size:12px;font-weight:600;letter-spacing:.07em}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border2)}
+.div-op{color:var(--lime)}.div-gov{color:var(--purple)}
+.gov-tbl{width:100%;border-collapse:collapse;font-size:13px}
+.gov-tbl th{background:rgba(167,139,250,.08);color:var(--text2);font-weight:500;padding:9px 12px;text-align:left;border-bottom:1px solid rgba(167,139,250,.2);white-space:nowrap}
+.gov-tbl td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.gov-tbl tr:last-child td{border-bottom:none}
+.gov-tbl tr:hover td{background:rgba(167,139,250,.03)}
+.bbar-bg{width:90px;background:var(--bg4);border-radius:3px;height:6px;overflow:hidden;flex-shrink:0;display:inline-block;vertical-align:middle}
+.bbar-fill{height:100%;border-radius:3px}
+.row-once td{background:rgba(255,170,0,.04)!important}
+.row-nodate td{background:rgba(255,68,85,.05)!important}
+.tr-total td{font-weight:700;color:var(--lime);background:var(--bg3)}
+.tr-mo td{font-weight:700;color:var(--lime);background:var(--bg3)}
+.tr-oc td{font-weight:600;color:var(--warn);background:rgba(255,170,0,.05)}
+.empty{text-align:center;padding:28px;color:var(--text3);font-size:13px}
+.badge-mo{font-size:10px;color:var(--safe);margin-left:4px}
+.badge-oc{font-size:10px;color:var(--warn);margin-left:4px}
+.badge-nd{font-size:10px;color:var(--danger);margin-left:4px}
+.info{border-radius:var(--radius);padding:9px 13px;margin-bottom:12px;font-size:12px}
+.info-op{background:rgba(200,241,53,.05);border:1px solid rgba(200,241,53,.15);color:rgba(200,241,53,.85)}
+.info-gov{background:rgba(167,139,250,.06);border:1px solid rgba(167,139,250,.18);color:rgba(167,139,250,.9)}
+.info-neutral{background:rgba(62,201,245,.06);border:1px solid rgba(62,201,245,.18);color:var(--cyan)}
+.warn-mark{display:inline-flex;align-items:center;gap:6px;background:rgba(255,68,85,.12);border:1px solid rgba(255,68,85,.3);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--danger)}
+.updated{font-size:11px;color:var(--text3)}
+.bot-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.prow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
+.prow:last-child{border-bottom:none}
+.pname{width:140px;font-size:12px;font-weight:500;flex-shrink:0}
+.pbar-bg{flex:1;background:var(--bg4);border-radius:4px;height:7px;overflow:hidden}
+.pbar-f{height:100%;border-radius:4px}
+.pmeta{width:160px;font-size:11px;color:var(--text2);text-align:right;flex-shrink:0}
+.elist{display:flex;flex-direction:column;gap:7px}
+.eitem{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:9px 12px;display:flex;align-items:center;gap:10px}
+.edate{font-size:12px;color:var(--text2);width:76px;flex-shrink:0}
+.ename{flex:1;font-size:12px}
+.eamt{font-size:13px;font-weight:600;color:var(--warn);flex-shrink:0}
+</style>
+</head>
+<body>
+<div id="gate">
+  <div class="gate-box">
+    <div class="gate-logo">HYPERDYNE</div>
+    <div class="gate-sub">Runway 재무 관리 시스템</div>
+    <input type="password" id="pwInput" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter')checkPw()" autofocus>
+    <button class="gate-btn" onclick="checkPw()">접속</button>
+    <div class="gate-err" id="pwErr"></div>
+  </div>
+</div>
+
+<div id="app" style="display:none;flex-direction:column">
+  <header>
+    <div class="logo">HYPERDYNE</div>
+    <div class="header-sep"></div>
+    <div class="header-date" id="hDate"></div>
+    <div class="header-right">
+      <span class="updated" id="hSaved"></span><span class="updated" id="syncBadge" style="margin-left:8px;color:var(--safe)"></span>
+      <button class="btn btn-outline btn-sm" onclick="resetData()">초기화</button>
+      <button class="btn btn-cyan btn-sm" id="exportBtn" onclick="exportFile()">💾 파일 저장</button>
+    </div>
+  </header>
+  <nav class="main-nav">
+    <button class="active" onclick="showMain('input')">데이터 입력</button>
+    <button onclick="showMain('dashboard')">대시보드</button>
+  </nav>
+
+  <!-- INPUT -->
+  <div class="content" id="inputSection">
+    <div class="balance-grid">
+      <div class="bc bc-op">
+        <div class="bc-lbl lbl-op">운영자금 현금잔액</div>
+        <div class="bc-val val-op" id="opBal">₩0</div>
+        <div class="bc-wrap"><input type="number" id="cashInput" placeholder="0" oninput="saveCash()"><span style="color:var(--text2);font-size:13px">원</span></div>
+        <div class="bc-note">매출·고정비·기업부담금(일시) 포함 내부 운영자금</div>
+      </div>
+      <div class="bc bc-gov">
+        <div class="bc-lbl lbl-gov">정부 사업비 잔액</div>
+        <div class="bc-val val-gov" id="govBal">₩0</div>
+        <div class="bc-note">프로젝트 총 금액 − 프로젝트별 지출 합계</div>
+        <div class="bc-auto">※ 프로젝트 데이터 변경 시 자동 갱신</div>
+      </div>
+    </div>
+    <div class="sub-nav">
+      <button class="active" onclick="showTab('fixed')">고정 지출</button>
+      <button onclick="showTab('projEntry')">프로젝트별 지출/수익</button>
+      <button onclick="showTab('events')">변동 이벤트</button>
+      <button onclick="showTab('projects')">프로젝트 현황</button>
+    </div>
+
+    <!-- 고정지출 -->
+    <div id="tab-fixed">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">인건비 <span style="color:var(--text3);font-weight:400;font-size:12px">— 급여+4대보험 · 매월 반복 · 운영자금 지출</span></span>
+          <button class="btn btn-lime btn-sm" onclick="addRow('personnel')">+ 인력 추가</button>
+        </div>
+        <div class="section-body"><div class="tbl-wrap"><table>
+          <thead><tr><th>발생월<span class="req">*</span></th><th>이름</th><th>직책</th><th style="text-align:right">기본급 (원)</th><th style="text-align:right">4대보험 (원)</th><th style="text-align:right">합계</th><th>비고</th><th></th></tr></thead>
+          <tbody id="personnel-body"></tbody>
+          <tfoot><tr class="tr-total"><td colspan="5" style="text-align:right;font-size:12px">월 인건비 합계</td><td class="num" id="personnel-total">₩0</td><td colspan="2"></td></tr></tfoot>
+        </table></div></div>
+      </div>
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">운영비 <span style="color:var(--text3);font-weight:400;font-size:12px">— 임대료, 수수료, 식대, 시스템이용료 등 · 매월 반복</span></span>
+          <button class="btn btn-lime btn-sm" onclick="addRow('operations')">+ 항목 추가</button>
+        </div>
+        <div class="section-body"><div class="tbl-wrap"><table>
+          <thead><tr><th>발생일<span class="req">*</span></th><th>분류<span class="req">*</span></th><th style="text-align:right">금액 (원)</th><th>비고</th><th></th></tr></thead>
+          <tbody id="operations-body"></tbody>
+          <tfoot><tr class="tr-total"><td colspan="2" style="text-align:right;font-size:12px">운영비 합계</td><td class="num" id="operations-total">₩0</td><td colspan="2"></td></tr></tfoot>
+        </table></div></div>
+      </div>
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">기타 고정지출 <span style="color:var(--text3);font-weight:400;font-size:12px">— 월반복: 매월 / 일시: 해당 날짜 월만 반영</span></span>
+          <button class="btn btn-lime btn-sm" onclick="addRow('otherFixed')">+ 항목 추가</button>
+        </div>
+        <div class="info info-op" style="margin:0 18px;border-radius:0;border-top:none;border-left:none;border-right:none;border-bottom:1px solid rgba(200,241,53,.15);background:transparent;padding:8px 0 10px">
+          💡 <strong>기업부담금</strong>은 이 탭에 <strong>일시</strong>로 등록 → 운영자금 지출로만 반영 (정부 사업비와 별도)
+        </div>
+        <div class="section-body"><div class="tbl-wrap"><table>
+          <thead><tr><th>발생일<span class="req">*</span></th><th>항목명</th><th style="text-align:right">금액 (원)</th><th>반복여부</th><th>비고</th><th></th></tr></thead>
+          <tbody id="otherFixed-body"></tbody>
+          <tfoot>
+            <tr class="tr-mo"><td colspan="2" style="text-align:right;font-size:12px">월 반복 합계 (매월 운영 반영)</td><td class="num" id="otherFixed-mo-total">₩0</td><td colspan="3"></td></tr>
+            <tr class="tr-oc"><td colspan="2" style="text-align:right;font-size:12px">일시 합계 (해당 날짜 월만 반영)</td><td class="num" id="otherFixed-oc-total">₩0</td><td colspan="3"></td></tr>
+          </tfoot>
+        </table></div></div>
+      </div>
+    </div>
+
+    <!-- 프로젝트별 지출/수익 -->
+    <div id="tab-projEntry" style="display:none">
+      <div class="info info-gov">💜 <strong>프로젝트별 지출</strong>은 정부 사업비 예산에서 집행된 내역입니다. 운영자금에 영향 없이 정부 사업비 잔액에만 반영됩니다.</div>
+      <div class="info info-op">💛 <strong>프로젝트별 수익</strong>은 발생일 기준으로 운영자금 수익에 반영됩니다 (매출·정부지원금·인건비환입 등 모두 포함).</div>
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">프로젝트별 지출 <span style="color:var(--purple);font-size:12px;font-weight:400">→ 정부 사업비 집행</span></span>
+          <button class="btn btn-lime btn-sm" onclick="addRow('projExpense')">+ 지출 추가</button>
+        </div>
+        <div class="section-body"><div class="tbl-wrap"><table>
+          <thead><tr><th>발생일<span class="req">*</span></th><th>프로젝트</th><th>분류<span class="req">*</span></th><th style="text-align:right">금액 (원)</th><th>증빙</th><th>비고</th><th></th></tr></thead>
+          <tbody id="projExpense-body"></tbody>
+          <tfoot><tr class="tr-total"><td colspan="3" style="text-align:right;font-size:12px">프로젝트 지출 합계</td><td class="num" id="projExpense-total">₩0</td><td colspan="3"></td></tr></tfoot>
+        </table></div></div>
+      </div>
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">프로젝트별 수익 <span style="color:var(--lime);font-size:12px;font-weight:400">→ 운영자금 수익</span></span>
+          <button class="btn btn-lime btn-sm" onclick="addRow('projIncome')">+ 수익 추가</button>
+        </div>
+        <div class="section-body"><div class="tbl-wrap"><table>
+          <thead><tr><th>발생일<span class="req">*</span></th><th>프로젝트</th><th>분류<span class="req">*</span></th><th style="text-align:right">금액 (원)</th><th>입금여부</th><th>비고</th><th></th></tr></thead>
+          <tbody id="projIncome-body"></tbody>
+          <tfoot><tr class="tr-total"><td colspan="3" style="text-align:right;font-size:12px">프로젝트 수익 합계</td><td class="num" id="projIncome-total">₩0</td><td colspan="3"></td></tr></tfoot>
+        </table></div></div>
+      </div>
+    </div>
+
+    <!-- 변동 이벤트 -->
+    <div id="tab-events" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">변동 이벤트 <span style="color:var(--text3);font-weight:400;font-size:12px">— 확정 항목만 운영 현금흐름에 반영</span></span>
+          <button class="btn btn-lime btn-sm" onclick="addRow('events')">+ 이벤트 추가</button>
+        </div>
+        <div class="section-body"><div class="tbl-wrap"><table>
+          <thead><tr><th>발생일<span class="req">*</span></th><th>분류<span class="req">*</span></th><th>내용</th><th style="text-align:right">예상금액 (원)</th><th>확정여부</th><th>비고</th><th></th></tr></thead>
+          <tbody id="events-body"></tbody>
+        </table></div></div>
+      </div>
+    </div>
+
+    <!-- 프로젝트 현황 -->
+    <div id="tab-projects" style="display:none">
+      <div class="info info-gov">💜 <strong>총 금액 = 현금 사업비 (정부지원금 + 기업부담금)</strong> — 총 금액에서 프로젝트별 지출을 차감하여 사업비 잔액을 자동 계산합니다. 기업부담금은 기타 고정지출-일시에 별도 입력하세요.</div>
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">프로젝트 현황</span>
+          <button class="btn btn-lime btn-sm" onclick="addRow('projects')">+ 프로젝트 추가</button>
+        </div>
+        <div class="section-body"><div class="tbl-wrap"><table>
+          <thead><tr><th>프로젝트명</th><th>유형<span class="req">*</span></th><th style="text-align:right">총 금액 (원)<br><span style="font-weight:400;font-size:10px;color:var(--purple)">(정부과제: 현금사업비)</span></th><th>계약일</th><th>종료일</th><th>상태</th><th>잔여기간</th><th></th></tr></thead>
+          <tbody id="projects-body"></tbody>
+        </table></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div class="content" id="dashboardSection" style="display:none">
+    <div class="divider div-op">내부 운영자금</div>
+    <div class="kpi5" id="opKpi"></div>
+    <div class="chart-box">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:4px">
+        <span class="ct">12개월 운영 현금흐름 예측</span>
+        <span id="warnMark" style="display:none" class="warn-mark"></span>
+      </div>
+      <div class="cl">
+        <div class="cl-item"><div class="cl-bar" style="background:#3EC9F5"></div>운영 수익 (전체 프로젝트 수익)</div>
+        <div class="cl-item"><div class="cl-bar" style="background:#ff4455"></div>운영 지출 (고정비+기업부담금포함)</div>
+        <div class="cl-item"><div class="cl-dot" style="background:#C8F135"></div>운영 잔액</div>
+        <div class="cl-item"><div style="width:12px;height:12px;background:#ff4455;border:2px solid #fff;flex-shrink:0"></div>잔액 1,000만원 이하</div>
+      </div>
+      <div class="cw"><canvas id="comboChart"></canvas></div>
+    </div>
+    <div class="bot-row">
+      <div class="chart-box" style="margin-bottom:0"><div class="ct">프로젝트별 수익 현황</div><div id="allProjStatus"></div></div>
+      <div class="chart-box" style="margin-bottom:0"><div class="ct">향후 변동 이벤트</div><div id="eventTL"></div></div>
+    </div>
+    <div class="divider div-gov">정부 사업비 현황</div>
+    <div class="kpi3" id="govKpi"></div>
+    <div class="chart-box"><div class="ct" style="margin-bottom:12px">정부과제별 사업비 집행 현황</div><div id="govTable"></div></div>
+  </div>
+</div>
+
+<script>
+var EMBEDDED=null;
+const PW='1234',WARN=10000000;
+let data={cash:0,personnel:[],operations:[],otherFixed:[],projExpense:[],projIncome:[],events:[],projects:[],lastUpdated:''};
+let charts={};
+
+function checkPw(){
+  if(document.getElementById('pwInput').value===PW){
+    document.getElementById('gate').style.display='none';
+    document.getElementById('app').style.display='flex';
+    initApp();
+  }else{
+    document.getElementById('pwErr').textContent='비밀번호가 올바르지 않습니다.';
+    document.getElementById('pwInput').value='';
+    document.getElementById('pwInput').focus();
+  }
+}
+// 원격 데이터 적용 (실시간 동기화용)
+window._applyRemote=function(remote){
+  data=remote;
+  window._appData=data;
+  localStorage.setItem('hyperdyne_runway',JSON.stringify(data));
+  ['personnel','operations','otherFixed','projExpense','projIncome','events','projects'].forEach(k=>{if(!Array.isArray(data[k]))data[k]=[];});
+  document.getElementById('cashInput').value=data.cash||'';
+  updOpBal();renderAll();updGovBal();updSaved();
+  const el=document.getElementById('syncBadge');
+  if(el){el.textContent='🔄 동기화됨';el.style.color='var(--safe)';setTimeout(()=>{el.textContent='';},2000);}
+};
+function initApp(){
+  // 1순위: hd-data textarea (저장된 파일)
+  try{
+    const el=document.getElementById('hd-data');
+    if(el&&el.value&&el.value!=='null'){
+      const parsed=JSON.parse(el.value);
+      if(parsed&&parsed.lastUpdated){data=parsed;localStorage.setItem('hyperdyne_runway',JSON.stringify(data));}
+    }
+  }catch(e){}
+  // 2순위: localStorage
+  if(!data.lastUpdated){const s=localStorage.getItem('hyperdyne_runway');if(s)try{const p=JSON.parse(s);if(p&&p.lastUpdated)data=p;}catch(e){}}
+  if(!data.cash)data.cash=0;
+  ['personnel','operations','otherFixed','projExpense','projIncome','events','projects'].forEach(k=>{if(!Array.isArray(data[k]))data[k]=[];});
+  delete data.govCash;
+  (data.otherFixed||[]).forEach(r=>{if(!r.recurring)r.recurring='월 반복';});
+  document.getElementById('hDate').textContent=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'});
+  document.getElementById('cashInput').value=data.cash||'';
+  updOpBal();renderAll();updGovBal();updSaved();
+  window._appData=data;
+  // Firestore 초기 데이터 로드 (로컬보다 최신이면 덮어씀)
+  if(window._fbSave){
+    import('https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js').then(({getFirestore,doc,getDoc})=>{
+      // onSnapshot이 이미 처리하므로 별도 getDoc 불필요
+    }).catch(()=>{});
+  }
+}
+function save(){
+  data.lastUpdated=new Date().toISOString();
+  localStorage.setItem('hyperdyne_runway',JSON.stringify(data));
+  window._appData=data;
+  if(window._ignoreNext)window._ignoreNext();
+  if(window._fbSave)window._fbSave(data);
+  updSaved();updGovBal();
+}
+function saveCash(){data.cash=parseFloat(document.getElementById('cashInput').value)||0;updOpBal();save();}
+function updOpBal(){document.getElementById('opBal').textContent=fmtW(data.cash);}
+function calcGovTotal(){return(data.projects||[]).filter(p=>p.type==='정부과제').reduce((s,p)=>{const b=parseFloat(p.total)||0,sp=(data.projExpense||[]).filter(e=>e.projectId===p.id).reduce((s2,e)=>s2+(parseFloat(e.amount)||0),0);return s+Math.max(0,b-sp);},0);}
+function updGovBal(){document.getElementById('govBal').textContent=fmtW(calcGovTotal());}
+function updSaved(){if(data.lastUpdated)document.getElementById('hSaved').textContent='저장: '+new Date(data.lastUpdated).toLocaleTimeString('ko-KR');}
+function fmtW(v){return'₩'+Math.round(parseFloat(v)||0).toLocaleString('ko-KR');}
+function fmtM(v){v=Math.round(parseFloat(v)||0);if(Math.abs(v)>=100000000)return(v/100000000).toFixed(1)+'억';if(Math.abs(v)>=10000000)return(v/10000000).toFixed(1)+'천만';if(Math.abs(v)>=1000000)return(v/1000000).toFixed(0)+'백만';return(v/10000).toFixed(0)+'만';}
+function uid(){return Date.now()+'_'+Math.random().toString(36).slice(2,6);}
+function nRec(v){return String(v||'월 반복').trim();}
+function showMain(tab){
+  document.getElementById('inputSection').style.display=tab==='input'?'block':'none';
+  document.getElementById('dashboardSection').style.display=tab==='dashboard'?'block':'none';
+  document.querySelectorAll('.main-nav button').forEach((b,i)=>b.classList.toggle('active',(i===0&&tab==='input')||(i===1&&tab==='dashboard')));
+  if(tab==='dashboard')renderDash();
+}
+function showTab(tab){
+  ['fixed','projEntry','events','projects'].forEach(t=>document.getElementById('tab-'+t).style.display=t===tab?'block':'none');
+  document.querySelectorAll('.sub-nav button').forEach((b,i)=>b.classList.toggle('active',['fixed','projEntry','events','projects'][i]===tab));
+}
+function renderAll(){['personnel','operations','otherFixed','projExpense','projIncome','events','projects'].forEach(t=>renderTable(t));}
+function getProjOpts(sid){let o=`<option value=""${!sid?' selected':''}>-- 선택 --</option>`;(data.projects||[]).forEach(p=>{o+=`<option value="${p.id}"${p.id===sid?' selected':''}>${p.name||'(미입력)'}</option>`;});return o;}
+function renderTable(type){
+  const body=document.getElementById(type+'-body');if(!body)return;
+  const rows=data[type]||[];
+  body.innerHTML=rows.length===0?'<tr><td colspan="10" class="empty">항목 없음 — 위 버튼으로 추가하세요</td></tr>':rows.map(r=>rowHTML(type,r)).join('');
+  updTotals(type);
+}
+function rowHTML(type,r){
+  const id=r.id,del=`<button class="btn btn-danger" onclick="delRow('${type}','${id}')">삭제</button>`;
+  if(type==='personnel'){
+    const tot=(parseFloat(r.salary)||0)+(parseFloat(r.insurance)||0);
+    return`<tr><td><input type="month" value="${r.month||''}" onchange="upd('personnel','${id}','month',this.value)"></td><td><input type="text" value="${r.name||''}" placeholder="홍길동" onchange="upd('personnel','${id}','name',this.value)"></td><td><input type="text" value="${r.title||''}" placeholder="연구원" onchange="upd('personnel','${id}','title',this.value)"></td><td><input type="number" id="sal_${id}" value="${r.salary||''}" style="text-align:right" placeholder="0" oninput="liveRowTot('${id}')" onchange="upd('personnel','${id}','salary',this.value)"></td><td><input type="number" id="ins_${id}" value="${r.insurance||''}" style="text-align:right" placeholder="0" oninput="liveRowTot('${id}')" onchange="upd('personnel','${id}','insurance',this.value)"></td><td class="num lime" id="rt_${id}">${fmtW(tot)}</td><td><input type="text" value="${r.note||''}" onchange="upd('personnel','${id}','note',this.value)"></td><td>${del}</td></tr>`;
+  }
+  if(type==='operations'){
+    return`<tr><td><input type="date" value="${r.date||''}" onchange="upd('operations','${id}','date',this.value)"></td><td><select onchange="upd('operations','${id}','cat',this.value)"><option value="">-- 선택 --</option>${['임대료','수수료','식대','시스템이용료','기타'].map(c=>`<option value="${c}"${r.cat===c?' selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" value="${r.amount||''}" style="text-align:right" onchange="upd('operations','${id}','amount',this.value)"></td><td><input type="text" value="${r.note||''}" onchange="upd('operations','${id}','note',this.value)"></td><td>${del}</td></tr>`;
+  }
+  if(type==='otherFixed'){
+    const rec=nRec(r.recurring),isO=rec==='일시',noD=isO&&!r.date;
+    const tc=noD?'class="row-nodate"':isO?'class="row-once"':'';
+    const badge=noD?'<span class="badge-nd">⚠날짜필수</span>':isO?'<span class="badge-oc">1회성</span>':'<span class="badge-mo">매월</span>';
+    return`<tr ${tc}><td><input type="date" value="${r.date||''}" onchange="upd('otherFixed','${id}','date',this.value)"></td><td><input type="text" value="${r.item||''}" placeholder="항목명" onchange="upd('otherFixed','${id}','item',this.value)"></td><td><input type="number" value="${r.amount||''}" style="text-align:right" onchange="upd('otherFixed','${id}','amount',this.value)"></td><td><select onchange="updRec('${id}',this.value)">${['월 반복','일시'].map(c=>`<option value="${c}"${rec===c?' selected':''}>${c}</option>`).join('')}</select>${badge}</td><td><input type="text" value="${r.note||''}" onchange="upd('otherFixed','${id}','note',this.value)"></td><td>${del}</td></tr>`;
+  }
+  if(type==='projExpense'){
+    // 기업부담금 제거. 기존 데이터 호환: cat=기업부담금이면 표시 유지
+    const cats=['재료비','운영비','복리후생','출장비','기부금','기타'];
+    const opts=cats.includes(r.cat)||!r.cat?cats:['기업부담금',...cats];
+    return`<tr><td><input type="date" value="${r.date||''}" onchange="upd('projExpense','${id}','date',this.value)"></td><td><select onchange="upd('projExpense','${id}','projectId',this.value)">${getProjOpts(r.projectId)}</select></td><td><select onchange="upd('projExpense','${id}','cat',this.value)"><option value="">-- 선택 --</option>${opts.map(c=>`<option value="${c}"${r.cat===c?' selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" value="${r.amount||''}" style="text-align:right" onchange="upd('projExpense','${id}','amount',this.value)"></td><td><select onchange="upd('projExpense','${id}','verified',this.value)">${['미확인','증빙완료'].map(c=>`<option value="${c}"${r.verified===c?' selected':''}>${c}</option>`).join('')}</select></td><td><input type="text" value="${r.note||''}" onchange="upd('projExpense','${id}','note',this.value)"></td><td>${del}</td></tr>`;
+  }
+  if(type==='projIncome'){
+    return`<tr><td><input type="date" value="${r.date||''}" onchange="upd('projIncome','${id}','date',this.value)"></td><td><select onchange="upd('projIncome','${id}','projectId',this.value)">${getProjOpts(r.projectId)}</select></td><td><select onchange="upd('projIncome','${id}','cat',this.value)"><option value="">-- 선택 --</option>${['매출','정부지원금','인건비','기타'].map(c=>`<option value="${c}"${r.cat===c?' selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" value="${r.amount||''}" style="text-align:right" onchange="upd('projIncome','${id}','amount',this.value)"></td><td><select onchange="upd('projIncome','${id}','paid',this.value)">${['미입금','입금완료'].map(c=>`<option value="${c}"${r.paid===c?' selected':''}>${c}</option>`).join('')}</select></td><td><input type="text" value="${r.note||''}" onchange="upd('projIncome','${id}','note',this.value)"></td><td>${del}</td></tr>`;
+  }
+  if(type==='events'){
+    return`<tr><td><input type="date" value="${r.date||''}" onchange="upd('events','${id}','date',this.value)"></td><td><select onchange="upd('events','${id}','cat',this.value)"><option value="">-- 선택 --</option>${['신규채용','차량구매','사무실이전','설비투자','기타'].map(c=>`<option value="${c}"${r.cat===c?' selected':''}>${c}</option>`).join('')}</select></td><td><input type="text" value="${r.content||''}" placeholder="내용" onchange="upd('events','${id}','content',this.value)"></td><td><input type="number" value="${r.amount||''}" style="text-align:right" onchange="upd('events','${id}','amount',this.value)"></td><td><select onchange="upd('events','${id}','confirmed',this.value)">${['예정','확정'].map(c=>`<option value="${c}"${r.confirmed===c?' selected':''}>${c}</option>`).join('')}</select></td><td><input type="text" value="${r.note||''}" onchange="upd('events','${id}','note',this.value)"></td><td>${del}</td></tr>`;
+  }
+  if(type==='projects'){
+    const today=new Date();let rem='';
+    if(r.endDate){const d=Math.ceil((new Date(r.endDate)-today)/86400000);if(d<0)rem='<span class="tag tag-danger">종료</span>';else if(d<30)rem=`<span class="tag tag-danger">${d}일</span>`;else if(d<90)rem=`<span class="tag tag-pend">${Math.ceil(d/30)}개월</span>`;else rem=`<span class="tag tag-ok">${Math.ceil(d/30)}개월</span>`;}
+    return`<tr><td><input type="text" value="${r.name||''}" placeholder="프로젝트명" onchange="upd('projects','${id}','name',this.value);renderTable('projExpense');renderTable('projIncome')"></td><td><select onchange="upd('projects','${id}','type',this.value)">${['정부과제','매출'].map(c=>`<option value="${c}"${r.type===c?' selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" value="${r.total||''}" style="text-align:right" onchange="upd('projects','${id}','total',this.value)"></td><td><input type="date" value="${r.contractDate||''}" onchange="upd('projects','${id}','contractDate',this.value)"></td><td><input type="date" value="${r.endDate||''}" onchange="upd('projects','${id}','endDate',this.value)"></td><td><select onchange="upd('projects','${id}','status',this.value)">${['진행중','완료','예정'].map(c=>`<option value="${c}"${r.status===c?' selected':''}>${c}</option>`).join('')}</select></td><td>${rem}</td><td>${del}</td></tr>`;
+  }
+  return'';
+}
+function addRow(type){
+  const d={personnel:{id:uid(),month:'',name:'',title:'',salary:'',insurance:'',note:''},operations:{id:uid(),date:'',cat:'',amount:'',note:''},otherFixed:{id:uid(),date:'',item:'',amount:'',recurring:'월 반복',note:''},projExpense:{id:uid(),date:'',projectId:'',cat:'',amount:'',verified:'미확인',note:''},projIncome:{id:uid(),date:'',projectId:'',cat:'',amount:'',paid:'미입금',note:''},events:{id:uid(),date:'',cat:'',content:'',amount:'',confirmed:'예정',note:''},projects:{id:uid(),name:'',type:'정부과제',total:'',contractDate:'',endDate:'',status:'진행중'}};
+  if(!data[type])data[type]=[];data[type].push(d[type]);save();renderTable(type);
+}
+function delRow(type,id){
+  data[type]=(data[type]||[]).filter(r=>r.id!==id);save();renderTable(type);
+  if(type==='projects'){renderTable('projExpense');renderTable('projIncome');}
+}
+function upd(type,id,field,value){const r=(data[type]||[]).find(r=>r.id===id);if(r){r[field]=value;save();updTotals(type);}}
+function updRec(id,value){const r=(data.otherFixed||[]).find(r=>r.id===id);if(r){r.recurring=value;save();renderTable('otherFixed');}}
+function liveRowTot(id){
+  const s=parseFloat(document.getElementById('sal_'+id)?.value)||0,ins=parseFloat(document.getElementById('ins_'+id)?.value)||0;
+  const el=document.getElementById('rt_'+id);if(el)el.textContent=fmtW(s+ins);
+  let tot=0;(data.personnel||[]).forEach(r=>{tot+=(parseFloat(document.getElementById('sal_'+r.id)?.value)||parseFloat(r.salary)||0)+(parseFloat(document.getElementById('ins_'+r.id)?.value)||parseFloat(r.insurance)||0);});
+  const ft=document.getElementById('personnel-total');if(ft)ft.textContent=fmtW(tot);
+}
+function updTotals(type){
+  if(type==='otherFixed'){
+    const mo=(data.otherFixed||[]).filter(r=>nRec(r.recurring)==='월 반복').reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+    const oc=(data.otherFixed||[]).filter(r=>nRec(r.recurring)==='일시').reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+    const e1=document.getElementById('otherFixed-mo-total'),e2=document.getElementById('otherFixed-oc-total');
+    if(e1)e1.textContent=fmtW(mo);if(e2)e2.textContent=fmtW(oc);return;
+  }
+  const t={personnel:()=>(data.personnel||[]).reduce((s,r)=>s+(parseFloat(r.salary)||0)+(parseFloat(r.insurance)||0),0),operations:()=>(data.operations||[]).reduce((s,r)=>s+(parseFloat(r.amount)||0),0),projExpense:()=>(data.projExpense||[]).reduce((s,r)=>s+(parseFloat(r.amount)||0),0),projIncome:()=>(data.projIncome||[]).reduce((s,r)=>s+(parseFloat(r.amount)||0),0)};
+  if(t[type]){const el=document.getElementById(type+'-total');if(el)el.textContent=fmtW(t[type]());}
+}
+
+// 운영 12개월:
+// 수익 = ALL projIncome (1회성, 발생일 기준)
+// 지출 = 고정비 + otherFixed일시 + 확정이벤트
+// projExpense는 정부사업비 예산 집행 → 운영자금 무관
+function calc12(){
+  const now=new Date();
+  const fp=(data.personnel||[]).reduce((s,r)=>s+(parseFloat(r.salary)||0)+(parseFloat(r.insurance)||0),0);
+  const fo=(data.operations||[]).reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+  const ff=(data.otherFixed||[]).filter(r=>nRec(r.recurring)==='월 반복').reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+  const mf=fp+fo+ff;
+  const labs=[],inA=[],outA=[],balA=[];
+  let bal=parseFloat(data.cash)||0,warnIdx=-1;
+  for(let i=0;i<12;i++){
+    const d=new Date(now.getFullYear(),now.getMonth()+i,1);
+    const yr=d.getFullYear(),mo=d.getMonth();
+    const inM=e=>{if(!e.date)return false;const ed=new Date(e.date);return!isNaN(ed)&&ed.getFullYear()===yr&&ed.getMonth()===mo;};
+    const tIn=(data.projIncome||[]).filter(inM).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    const oto=(data.otherFixed||[]).filter(r=>nRec(r.recurring)==='일시'&&inM(r)).reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+    const evo=(data.events||[]).filter(e=>e.confirmed==='확정'&&inM(e)).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    const tOut=mf+oto+evo;
+    bal=bal+tIn-tOut;
+    if(warnIdx===-1&&bal<WARN)warnIdx=i;
+    labs.push(d.toLocaleDateString('ko-KR',{month:'short'}));
+    inA.push(Math.round(tIn));outA.push(Math.round(tOut));balA.push(Math.round(bal));
+  }
+  return{labs,inA,outA,balA,warnIdx,mf};
+}
+function calcGov(){
+  return(data.projects||[]).filter(p=>p.type==='정부과제').map(p=>{
+    const budget=parseFloat(p.total)||0;
+    const spent=(data.projExpense||[]).filter(e=>e.projectId===p.id).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    const rem=budget-spent,pct=budget>0?Math.min(100,Math.round(spent/budget*100)):0;
+    return{...p,budget,spent,rem,pct};
+  });
+}
+function renderDash(){
+  const{labs,inA,outA,balA,warnIdx,mf}=calc12();
+  const cash=parseFloat(data.cash)||0;
+  const rw=mf>0?Math.floor(cash/mf):999;
+  let rwC='green',rwN='안전';if(rw<=3){rwC='red';rwN='위험';}else if(rw<=6){rwC='orange';rwN='주의';}
+  document.getElementById('opKpi').innerHTML=`
+    <div class="kc"><div class="kc-lbl">운영 현금잔액</div><div class="kc-val lime">${fmtW(cash)}</div><div class="kc-sub">내부 운영자금</div></div>
+    <div class="kc"><div class="kc-lbl">이번달 수익</div><div class="kc-val cyan">${fmtW(inA[0]||0)}</div><div class="kc-sub">전체 프로젝트 수익</div></div>
+    <div class="kc"><div class="kc-lbl">이번달 지출</div><div class="kc-val red">${fmtW(outA[0]||0)}</div><div class="kc-sub">고정비+기업부담금(일시)</div></div>
+    <div class="kc"><div class="kc-lbl">운영 Runway</div><div class="kc-val ${rwC}">${rw<999?rw+'개월':'∞'}</div><div class="kc-sub">${rwN} · 고정비 기준</div></div>
+    <div class="kc"><div class="kc-lbl">월 고정 번율</div><div class="kc-val orange">${fmtW(mf)}</div><div class="kc-sub">인건비+운영비+기타(월반복)</div></div>`;
+  const wm=document.getElementById('warnMark');
+  if(warnIdx>=0){wm.style.display='inline-flex';wm.textContent=`⚠ ${labs[warnIdx]}에 운영 잔액 1,000만원 이하 도달 예정`;}else wm.style.display='none';
+  const bc=balA.map((v,i)=>(i===warnIdx||v<WARN)?'#ff4455':v<WARN*3?'#ffaa00':'#C8F135');
+  const br=balA.map((v,i)=>i===warnIdx?8:4),bs=balA.map((v,i)=>i===warnIdx?'triangle':'circle');
+  if(charts.c)charts.c.destroy();
+  charts.c=new Chart(document.getElementById('comboChart').getContext('2d'),{
+    data:{labels:labs,datasets:[
+      {type:'bar',label:'운영 수익',data:inA,backgroundColor:'rgba(62,201,245,.5)',borderColor:'#3EC9F5',borderWidth:1,yAxisID:'yB',order:2},
+      {type:'bar',label:'운영 지출',data:outA,backgroundColor:'rgba(255,68,85,.5)',borderColor:'#ff4455',borderWidth:1,yAxisID:'yB',order:2},
+      {type:'line',label:'운영 잔액',data:balA,borderColor:'#C8F135',backgroundColor:'rgba(200,241,53,.06)',fill:true,tension:.35,pointBackgroundColor:bc,pointBorderColor:bc,pointRadius:br,pointStyle:bs,borderWidth:2.5,yAxisID:'yL',order:1},
+      {type:'line',label:'경고선',data:Array(12).fill(WARN),borderColor:'rgba(255,68,85,.4)',borderDash:[6,4],borderWidth:1.5,pointRadius:0,fill:false,yAxisID:'yL',order:3}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{backgroundColor:'#1e1e1e',borderColor:'#3a3a3a',borderWidth:1,titleColor:'#aaa',bodyColor:'#f0f0f0',callbacks:{label:c=>{if(c.dataset.label==='경고선')return null;return` ${c.dataset.label}: ${fmtW(c.parsed.y)}`;}}}},
+      scales:{x:{grid:{color:'#2a2a2a'},ticks:{color:'#888',font:{size:11}}},yB:{type:'linear',position:'left',grid:{color:'#2a2a2a'},ticks:{color:'#888',font:{size:10},callback:v=>fmtM(v)},title:{display:true,text:'수익/지출',color:'#555',font:{size:10}}},yL:{type:'linear',position:'right',grid:{drawOnChartArea:false},ticks:{color:'#C8F135',font:{size:10},callback:v=>fmtM(v)},title:{display:true,text:'잔액',color:'#C8F135',font:{size:10}}}}}
+  });
+  // 프로젝트 수익 현황
+  const ap=document.getElementById('allProjStatus');
+  const projs=(data.projects||[]).filter(p=>p.status==='진행중');
+  if(!projs.length){ap.innerHTML='<div class="empty">진행중인 프로젝트가 없습니다.</div>';}
+  else{ap.innerHTML=projs.map(p=>{
+    const recv=(data.projIncome||[]).filter(e=>e.projectId===p.id).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
+    const tot=parseFloat(p.total)||0,pct=tot>0?Math.min(100,Math.round(recv/tot*100)):0;
+    const fc=pct>=80?'#00cc88':pct>=50?'#C8F135':'#3EC9F5';
+    return`<div class="prow"><div class="pname"><span class="tag ${p.type==='정부과제'?'tag-gov':'tag-sales'}">${p.type}</span><br><span style="font-size:11px">${p.name||'(미입력)'}</span></div><div class="pbar-bg"><div class="pbar-f" style="width:${pct}%;background:${fc}"></div></div><div class="pmeta">수령 ${fmtW(recv)} (${pct}%)</div></div>`;
+  }).join('');}
+  // 이벤트
+  const et=document.getElementById('eventTL');
+  const today=new Date();
+  const up=(data.events||[]).filter(e=>e.date&&new Date(e.date)>=today).sort((a,b)=>new Date(a.date)-new Date(b.date)).slice(0,5);
+  if(!up.length){et.innerHTML='<div class="empty">예정된 변동 이벤트가 없습니다.</div>';}
+  else{et.innerHTML='<div class="elist">'+up.map(e=>`<div class="eitem"><div class="edate">${e.date}</div><div class="ename"><span class="tag ${e.confirmed==='확정'?'tag-ok':'tag-pend'}">${e.confirmed}</span> ${e.cat||''} ${e.content||''}</div><div class="eamt">${fmtW(e.amount)}</div></div>`).join('')+'</div>';}
+  // 정부 사업비
+  const gp=calcGov();
+  const tB=gp.reduce((s,p)=>s+p.budget,0),tS=gp.reduce((s,p)=>s+p.spent,0),tR=gp.reduce((s,p)=>s+Math.max(0,p.rem),0);
+  const op=tB>0?Math.round(tS/tB*100):0;
+  document.getElementById('govKpi').innerHTML=`
+    <div class="kc"><div class="kc-lbl">정부 사업비 잔액 합계</div><div class="kc-val purple">${fmtW(tR)}</div><div class="kc-sub">자동 계산 (총 사업비−집행)</div></div>
+    <div class="kc"><div class="kc-lbl">총 사업비 규모</div><div class="kc-val cyan">${fmtW(tB)}</div><div class="kc-sub">정부과제 사업비 합계</div></div>
+    <div class="kc"><div class="kc-lbl">전체 집행률</div><div class="kc-val ${op>80?'red':op>60?'orange':'green'}">${op}%</div><div class="kc-sub">${fmtW(tS)} 집행</div></div>`;
+  const gt=document.getElementById('govTable');
+  if(!gp.length){gt.innerHTML='<div class="empty">등록된 정부과제가 없습니다. 프로젝트 현황 탭에서 추가하세요.</div>';}
+  else{
+    gt.innerHTML=`<div class="tbl-wrap"><table class="gov-tbl">
+      <thead><tr><th>프로젝트명</th><th style="text-align:right">총 사업비<br><span style="font-weight:400;font-size:10px">(정부지원금+기업부담금)</span></th><th style="text-align:right">집행액</th><th>집행률</th><th style="text-align:right">잔여 사업비</th><th>상태</th><th>잔여기간</th></tr></thead>
+      <tbody>${gp.map(p=>{
+        const fc=p.pct>80?'#ff4455':p.pct>60?'#ffaa00':'#a78bfa';
+        const rc=p.rem<0?'style="color:var(--danger);font-weight:700"':'style="color:var(--safe)"';
+        const st=p.status==='진행중'?'tag-ok':p.status==='완료'?'tag-pend':'tag-gov';
+        let rem2='—';if(p.endDate){const d2=Math.ceil((new Date(p.endDate)-today)/86400000);if(d2<0)rem2='<span class="tag tag-danger">종료</span>';else if(d2<30)rem2=`<span class="tag tag-danger">${d2}일</span>`;else if(d2<90)rem2=`<span class="tag tag-pend">${Math.ceil(d2/30)}개월</span>`;else rem2=`<span class="tag tag-ok">${Math.ceil(d2/30)}개월</span>`;}
+        return`<tr><td><strong>${p.name||'(미입력)'}</strong></td><td class="num">${fmtW(p.budget)}</td><td class="num">${fmtW(p.spent)}</td><td><div style="display:flex;align-items:center;gap:6px"><div class="bbar-bg"><div class="bbar-fill" style="width:${p.pct}%;background:${fc}"></div></div><span style="font-size:12px;color:${fc};font-weight:600">${p.pct}%</span></div></td><td class="num" ${rc}>${fmtW(p.rem)}</td><td><span class="tag ${st}">${p.status}</span></td><td>${rem2}</td></tr>`;
+      }).join('')}</tbody>
+      <tfoot><tr style="background:rgba(167,139,250,.06)"><td style="font-weight:600;color:var(--purple)">합계</td><td class="num" style="font-weight:600;color:var(--purple)">${fmtW(tB)}</td><td class="num" style="font-weight:600">${fmtW(tS)}</td><td></td><td class="num" style="font-weight:600;color:var(--safe)">${fmtW(tR)}</td><td colspan="2"></td></tr></tfoot>
+    </table></div>`;
+  }
+  updGovBal();
+}
+function exportFile(){
+  save();
+  const btn=document.getElementById('exportBtn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ 저장 중...';}
+  try{
+    const json=JSON.stringify(data);
+    const raw=document.documentElement.outerHTML;
+    // textarea#hd-data 내용을 JSON으로 교체
+    const open='<textarea id="hd-data" style="display:none">';
+    const close='</textarea>';
+    const si=raw.indexOf(open);
+    const ei=raw.indexOf(close,si);
+    if(si===-1||ei===-1){
+      alert('내보내기 오류: 데이터 슬롯을 찾을 수 없습니다.');
+      if(btn){btn.disabled=false;btn.textContent='💾 파일 저장';}
+      return;
+    }
+    const exp=raw.slice(0,si+open.length)+json+raw.slice(ei);
+    const fname='HYPERDYNE_Runway_'+new Date().toISOString().slice(0,10)+'.html';
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([exp],{type:'text/html;charset=utf-8'}));
+    a.download=fname;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    if(btn){btn.disabled=false;btn.textContent='✅ 저장 완료';setTimeout(()=>{btn.textContent='💾 파일 저장';},2000);}
+  }catch(err){if(btn){btn.disabled=false;btn.textContent='💾 파일 저장';}alert('내보내기 오류: '+err.message);}
+}
+function resetData(){
+  if(!confirm('모든 데이터를 초기화하시겠습니까?\n이 작업은 되돌릴 수 없습니다.'))return;
+  localStorage.removeItem('hyperdyne_runway');
+  data={cash:0,personnel:[],operations:[],otherFixed:[],projExpense:[],projIncome:[],events:[],projects:[],lastUpdated:''};
+  if(window._fbSave)window._fbSave(data);
+  document.getElementById('cashInput').value='';
+  updOpBal();updGovBal();renderAll();showMain('input');
+}
+</script>
+<textarea id="hd-data" style="display:none">null</textarea>
+</body>
+</html>
